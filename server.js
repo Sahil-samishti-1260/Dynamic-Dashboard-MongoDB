@@ -17,6 +17,7 @@ const limiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
+//////////////////////////////////////////////////////
 
 app.use('/query', limiter); // Apply to your query endpoint security layer
 
