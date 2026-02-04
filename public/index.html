@@ -668,6 +668,13 @@
           <button class="btn-primary" onclick="addAggregationRow()">➕ Add Calculation</button>
         </section>
 
+        <section class="section having-section">
+          <h2 class="section-title">Filter Calculated Values (HAVING)</h2>
+          <p class="section-subtitle">Add filters on the results of your calculations (e.g., sum > 1000)</p>
+          <div id="having"></div>
+          <button class="btn-primary" onclick="addHavingRow()">➕ Add Post-Filter</button>
+        </section>
+
         <section class="section actions-section">
           <h2 class="section-title">Actions</h2>
           <button class="btn-primary" onclick="run()">▶ Execute Query</button>
@@ -795,7 +802,7 @@
       }
 
       function collectFilters() {
-        const rows = document.querySelectorAll(".filter-row");
+        const rows = document.querySelectorAll("#filters .filter-row");
         const regularFilters = [];
 
         rows.forEach((r, index) => {
@@ -969,7 +976,7 @@
             operator: op,
             collection: collection,
             field: field,
-            alias: `${op}_${field}`, // Default alias without user input
+            alias: op, // Set alias to operator name to match having filters
           };
 
           aggregations.push(aggregation);
@@ -980,6 +987,89 @@
 
         console.log(`Aggregations collected: ${aggregations.length}`);
         return aggregations;
+      }
+
+      function addHavingRow() {
+        const havingContainer = document.getElementById("having");
+
+        const row = document.createElement("div");
+        row.className = "filter-row";
+
+        // Field selection (Calculated field names)
+        const fieldGroup = document.createElement("div");
+        fieldGroup.className = "form-group";
+        const fieldLabel = document.createElement("label");
+        fieldLabel.textContent = "Calculated Field";
+        const fieldSel = document.createElement("select");
+        fieldSel.innerHTML = `
+          <option value="sum">sum</option>
+          <option value="avg">avg</option>
+          <option value="count">count</option>
+          <option value="min">min</option>
+          <option value="max">max</option>
+        `;
+        fieldGroup.append(fieldLabel, fieldSel);
+
+        // Operator selection
+        const opGroup = document.createElement("div");
+        opGroup.className = "form-group";
+        const opLabel = document.createElement("label");
+        opLabel.textContent = "Condition";
+        const opSel = document.createElement("select");
+        opSel.innerHTML = `
+          <option value="gt">Greater than (>)</option>
+          <option value="gte">Greater than or equal (>=)</option>
+          <option value="lt">Less than (<)</option>
+          <option value="lte">Less than or equal (<=)</option>
+          <option value="eq">Equal (=)</option>
+        `;
+        opGroup.append(opLabel, opSel);
+
+        // Value input
+        const valGroup = document.createElement("div");
+        valGroup.className = "form-group";
+        const valLabel = document.createElement("label");
+        valLabel.textContent = "Threshold Value";
+        const valInput = document.createElement("input");
+        valInput.type = "text";
+        valInput.placeholder = "e.g. 1000";
+        valGroup.append(valLabel, valInput);
+
+        const btn = document.createElement("button");
+        btn.className = "btn-danger";
+        btn.textContent = "Remove";
+        btn.onclick = () => row.remove();
+
+        row.append(fieldGroup, opGroup, valGroup, btn);
+        havingContainer.appendChild(row);
+
+        // Add animation
+        row.style.opacity = "0";
+        row.style.transform = "translateY(-10px)";
+        setTimeout(() => {
+          row.style.transition = "all 0.3s ease";
+          row.style.opacity = "1";
+          row.style.transform = "translateY(0)";
+        }, 10);
+      }
+
+      function collectHaving() {
+        const rows = document.querySelectorAll("#having .filter-row");
+        const having = [];
+
+        rows.forEach((r, index) => {
+          const selects = r.querySelectorAll("select");
+          const field = selects[0].value;
+          const operator = selects[1].value;
+          const valInput = r.querySelector("input");
+          const value = valInput.value;
+
+          if (field && operator && value) {
+            having.push({ field, operator, value });
+          }
+        });
+
+        return having;
       }
 
       async function run() {
@@ -993,10 +1083,12 @@
         try {
           const regularFilters = collectFilters();
           const aggregations = collectAggregations();
+          const havingFilters = collectHaving();
 
           // Debug: Log the collected filters and aggregations
           console.log("Regular filters:", regularFilters);
           console.log("Aggregation operations:", aggregations);
+          console.log("Having filters:", havingFilters);
 
           // Show loading indicator
           const detailedContainer = document.getElementById("detailedTableContainer");
@@ -1013,6 +1105,11 @@
           // Add aggregation operations if any
           if (aggregations.length > 0) {
             requestBody.aggregation = aggregations;
+          }
+
+          // Add having filters if any
+          if (havingFilters.length > 0) {
+            requestBody.having = havingFilters;
           }
 
           const res = await fetch("http://localhost:3000/query", {
@@ -1055,8 +1152,9 @@
       }
 
       function clearAll() {
-        const filtersContainer = document.getElementById("filters");
-        filtersContainer.innerHTML = "";
+        document.getElementById("filters").innerHTML = "";
+        document.getElementById("aggregations").innerHTML = "";
+        document.getElementById("having").innerHTML = "";
         document.getElementById("detailedTableContainer").innerHTML = "";
         document.getElementById("aggregationTableContainer").innerHTML = "";
         document.getElementById("out").textContent = "";
@@ -1071,9 +1169,10 @@
         const description = prompt("Enter a description (optional):") || "";
         const filters = collectFilters();
         const aggregations = collectAggregations();
+        const having = collectHaving();
         
-        if (filters.length === 0 && aggregations.length === 0) {
-          showNotification("No filters or aggregations to save!", "warning");
+        if (filters.length === 0 && aggregations.length === 0 && having.length === 0) {
+          showNotification("No configuration to save!", "warning");
           return;
         }
         
@@ -1085,7 +1184,8 @@
             name,
             description,
             filters,
-            aggregation: aggregations
+            aggregation: aggregations,
+            having: having
           })
         })
         .then(response => response.json())
@@ -1114,6 +1214,7 @@
             // Clear current UI
             document.getElementById("filters").innerHTML = "";
             document.getElementById("aggregations").innerHTML = "";
+            document.getElementById("having").innerHTML = "";
             
             // Recreate filters
             config.filters.forEach(filter => {
@@ -1149,6 +1250,25 @@
                   
                   if (fieldSel) fieldSel.value = `${agg.collection}.${agg.field}`;
                   if (opSel) opSel.value = agg.operator;
+                }
+              });
+            }
+
+            // Recreate having filters
+            if (config.having && Array.isArray(config.having)) {
+              config.having.forEach(h => {
+                addHavingRow();
+                const rows = document.querySelectorAll("#having .filter-row");
+                if (rows.length > 0) {
+                  const lastRow = rows[rows.length - 1];
+                  const selects = lastRow.querySelectorAll("select");
+                  const fieldSel = selects[0];
+                  const opSel = selects[1];
+                  const valInp = lastRow.querySelector("input");
+                  
+                  if (fieldSel) fieldSel.value = h.field;
+                  if (opSel) opSel.value = h.operator;
+                  if (valInp) valInp.value = h.value;
                 }
               });
             }

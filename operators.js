@@ -19,13 +19,19 @@ function maybeNumber(v) {
 }
 
 function maybeDate(v) {
-  // Check if it looks like a date string
-  if (typeof v === "string" && 
-      (/^\d{4}-\d{2}-\d{2}/.test(v) || /^\d{4}-\d{2}-\d{2}T/.test(v))) {
-    // Try to parse as date
-    const date = new Date(v);
-    if (date.toString() !== 'Invalid Date') {
-      return date;
+  // Check if it looks like a date string (YYYY-MM-DD or DD-MM-YYYY)
+  if (typeof v === "string") {
+    // YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}/.test(v)) {
+      const date = new Date(v);
+      if (date.toString() !== 'Invalid Date') return date;
+    }
+    // DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = v.match(/^(\d{2})[-/](\d{2})[-/](\d{4})/);
+    if (dmyMatch) {
+      const [_, day, month, year] = dmyMatch;
+      const date = new Date(`${year}-${month}-${day}`);
+      if (date.toString() !== 'Invalid Date') return date;
     }
   }
   return v;
