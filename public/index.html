@@ -185,9 +185,9 @@
       }
 
       .actions-section {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 15px;
-        flex-wrap: wrap;
       }
 
       pre {
@@ -196,10 +196,12 @@
         padding: 20px;
         border-radius: 8px;
         font-family: "Courier New", monospace;
-        font-size: 0.9rem;
+        font-size: 0.8rem;
         line-height: 1.5;
         overflow-x: auto;
-        margin-top: 15px;
+        margin-top: 30px;
+        max-height: 300px;
+        border: 1px solid #333;
       }
 
       .loading {
@@ -297,21 +299,23 @@
       }
 
       /* Filter row specific styles */
-      .filter-row {
+      .filter-row, .aggregation-row {
         display: flex;
         gap: 15px;
-        margin-bottom: 20px;
+        margin-bottom: 15px;
         padding: 20px;
         background: white;
-        border-radius: 10px;
+        border-radius: 12px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        align-items: end;
+        align-items: flex-end;
         transition: var(--transition);
+        border: 1px solid transparent;
       }
 
-      .filter-row:hover {
+      .filter-row:hover, .aggregation-row:hover {
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         transform: translateY(-2px);
+        border-color: var(--primary-color);
       }
 
       /* Improved table container */
@@ -528,71 +532,116 @@
       /* Saved configurations styles */
       .saved-configs-section {
         margin-top: 20px;
-        padding: 20px;
-        background: linear-gradient(to right, #f0f4f8, #e2e8f0);
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-      }
-
-      .saved-config-item {
+        padding: 25px;
         background: white;
-        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: var(--shadow);
+      }
+
+      .configs-table-wrapper {
+        overflow-x: auto;
+        margin-top: 15px;
         border-radius: 8px;
+        border: 1px solid var(--border-color);
+      }
+
+      .configs-table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 600px;
+      }
+
+      .configs-table th,
+      .configs-table td {
         padding: 15px;
-        margin-bottom: 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .configs-table th {
+        background: var(--background-light);
+        font-weight: 600;
+        color: var(--text-primary);
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .configs-table tr:last-child td {
+        border-bottom: none;
+      }
+
+      .configs-table tr:hover {
+        background-color: #f8fafc;
+      }
+
+      .config-actions {
         display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 10px;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        gap: 8px;
       }
 
-      .saved-config-item:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+      .badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: var(--background-light);
+        color: var(--text-secondary);
       }
 
-      .saved-config-item strong {
-        flex: 1;
-        min-width: 150px;
-        color: #2d3748;
+      .btn-small {
+        padding: 8px 12px;
+        font-size: 0.8rem;
+        width: auto;
       }
 
-      .saved-config-item p {
-        flex: 2;
-        min-width: 200px;
-        margin: 0;
-        color: #4a5568;
-        font-size: 0.9em;
+      .btn-load {
+        background: var(--accent-color);
+        color: white;
       }
 
-      .saved-config-item small {
-        color: #718096;
-        font-size: 0.8em;
-        margin-right: 10px;
+      .btn-load:hover {
+        background: #43a047;
       }
 
-      .small-btn {
-        padding: 6px 12px;
-        font-size: 0.85em;
-        margin-left: 5px;
-      }
+      /* Enhanced mobile responsiveness */
+      @media (max-width: 768px) {
+        body {
+          padding: 10px;
+        }
 
-      .no-saved {
-        text-align: center;
-        color: #718096;
-        font-style: italic;
-        padding: 20px;
-      }
+        .header h1 {
+          font-size: 1.8rem;
+        }
 
-      /* Animation for new elements */
-      @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
+        .section {
+          padding: 15px;
+        }
 
-      .saved-config-item {
-        animation: fadeIn 0.3s ease-out;
+        .filter-row, .aggregation-row {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 10px;
+          padding: 15px;
+        }
+
+        .form-group {
+          width: 100%;
+        }
+
+        .actions-section {
+          flex-direction: column;
+        }
+
+        .btn-primary, .btn-danger {
+          width: 100%;
+        }
+
+        .configs-table th:nth-child(2),
+        .configs-table td:nth-child(2) {
+          display: none; /* Hide description on small screens */
+        }
       }
     </style>
   </head>
@@ -1121,24 +1170,49 @@
         .then(data => {
           const configs = data.configs || [];
           const container = document.getElementById("savedConfigsList") || createSavedConfigsContainer();
+          const content = container.querySelector("#savedConfigsContent");
           
           if (configs.length === 0) {
-            container.querySelector("#savedConfigsContent").innerHTML = 
-              '<p class="no-saved">No saved configurations yet</p>';
+            content.innerHTML = '<p class="no-saved">No saved configurations yet</p>';
             return;
           }
           
-          const html = configs.map(config => `
-            <div class="saved-config-item">
-              <strong>${config.name}</strong>
-              <p>${config.description || 'No description'}</p>
-              <small>Filters: ${config.filters.length}, Aggregations: ${config.aggregation?.length || 0}</small>
-              <button class="btn-primary small-btn" onclick="loadSavedConfig('${config.name.replace(/'/g, "\\'")}')">Load</button>
-              <button class="btn-danger small-btn" onclick="deleteSavedConfig('${config._id}')">Delete</button>
-            </div>
+          let tableHtml = `
+            <div class="configs-table-wrapper">
+              <table class="configs-table">
+                <thead>
+                  <tr>
+                    <th>Config Name</th>
+                    <th>Description</th>
+                    <th>Components</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+          `;
+
+          tableHtml += configs.map(config => `
+            <tr>
+              <td><strong>${config.name}</strong></td>
+              <td>${config.description || '<span style="color:#999 italic">No description</span>'}</td>
+              <td>
+                <span class="badge">🔍 ${config.filters.length} Filters</span>
+                <span class="badge">📊 ${config.aggregation?.length || 0} Calcs</span>
+              </td>
+              <td class="config-actions">
+                <button class="btn-small btn-load" onclick="loadSavedConfig('${config.name.replace(/'/g, "\\'")}')">Load</button>
+                <button class="btn-small btn-danger" onclick="deleteSavedConfig('${config._id}')">Delete</button>
+              </td>
+            </tr>
           `).join('');
           
-          container.querySelector("#savedConfigsContent").innerHTML = html;
+          tableHtml += `
+                </tbody>
+              </table>
+            </div>
+          `;
+          
+          content.innerHTML = tableHtml;
         })
         .catch(error => {
           console.error("Load configs list error:", error);
