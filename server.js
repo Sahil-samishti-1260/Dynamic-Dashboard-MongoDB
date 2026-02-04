@@ -110,7 +110,10 @@ function validateFilter(filter) {
   
   // Validate value types
   if (typeof filter.value === 'object' && filter.value !== null && !Array.isArray(filter.value)) {
-    throw new Error('Object values not allowed for security reasons');
+    // Allow objects for 'between' operator
+    if (filter.operator !== 'between') {
+      throw new Error('Object values not allowed for security reasons');
+    }
   }
   
   return true;
@@ -153,7 +156,7 @@ function buildDetailedRecordsPipeline(filters) {
 }
 
 // Handle aggregation queries
-function buildAggregationPipeline(filters, aggregationOps = []) {
+function buildAggregationPipeline(filters, aggregationOps = [], havingFilters = []) {
   const pipeline = [];
   
   // Build joins if needed
@@ -202,13 +205,18 @@ function buildAggregationPipeline(filters, aggregationOps = []) {
     
     pipeline.push({ $group: groupStage });
   }
+
+  // Add post-aggregation match stage (HAVING clause)
+  if (havingFilters.length > 0) {
+    pipeline.push({ $match: buildMatch(havingFilters) });
+  }
   
   return pipeline;
 }
 
 app.post("/query", async (req, res) => {
   try {
-    const { database, filters = [], aggregation = [] } = req.body;
+    const { database, filters = [], aggregation = [], having = [] } = req.body;
     
     if (!database) {
       return res.status(400).json({ error: "Database name is required" });
@@ -228,8 +236,8 @@ app.post("/query", async (req, res) => {
       const detailedPipeline = buildDetailedRecordsPipeline(filters);
       detailedData = await db.collection(resolveRoot(filters)).aggregate(detailedPipeline, { allowDiskUse: true }).toArray();
       
-      // Get aggregated results
-      const aggregationPipeline = buildAggregationPipeline(filters, aggregation);
+      // Get aggregated results (now with optional having filters)
+      const aggregationPipeline = buildAggregationPipeline(filters, aggregation, having);
       aggregationData = await db.collection(resolveRoot(filters)).aggregate(aggregationPipeline, { allowDiskUse: true }).toArray();
       
       // Enhance detailed records to include requested field values from joined collections
@@ -264,11 +272,24 @@ app.post("/query", async (req, res) => {
       
       // Validate filters
       for (const f of filters) {
-        validateFilter(f); // Add security validation
+        validateFilter(f);
         if (!f.collection || !f.field || !f.operator) {
           return res.status(400).json({ 
             error: "Each filter must have collection, field, and operator" 
           });
+        }
+      }
+
+      // Validate having filters
+      for (const h of having) {
+        // Validate field names (prevent special MongoDB operators)
+        if (typeof h.field === 'string' && (h.field.includes('$') || h.field.includes('.'))) {
+          throw new Error(`Invalid field name in having clause: ${h.field}`);
+        }
+        // Validate operator
+        const allowedOperators = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'];
+        if (!allowedOperators.includes(h.operator)) {
+          throw new Error(`Invalid operator in having clause: ${h.operator}`);
         }
       }
       
