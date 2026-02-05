@@ -5,6 +5,7 @@ import 'dotenv/config';
 import { getDB } from "./db.js";
 import { buildJoinPlan } from "./joinPlanner.js";
 import { buildMatch } from "./filterBuilder.js";
+import OPERATORS from './operators.js';
 import { ObjectId } from 'mongodb';
 
 const app = express();
@@ -155,8 +156,8 @@ function buildDetailedRecordsPipeline(filters) {
   return pipeline;
 }
 
-// Handle aggregation queries
-function buildAggregationPipeline(filters, aggregationOps = [], havingFilters = []) {
+// Unified aggregation pipeline builder for complex queries with filters, aggregations, and HAVING
+function buildAggregationPipeline(filters, aggregationOps = [], havingFilters = [], groupByFields = []) {
   const pipeline = [];
   
   // Build joins if needed
@@ -175,7 +176,7 @@ function buildAggregationPipeline(filters, aggregationOps = [], havingFilters = 
     pipeline.push({ $unwind: `$${j.as}` });
   });
   
-  // Add match stage for filters
+  // Add match stage for filters (WHERE clause)
   if (filters.length > 0) {
     const matchFilters = filters.map(f => ({
       field: resolveFieldPath(root, f),
@@ -188,9 +189,19 @@ function buildAggregationPipeline(filters, aggregationOps = [], havingFilters = 
     }
   }
   
-  // Add aggregation stages
+  // Add aggregation stages if needed
   if (aggregationOps.length > 0) {
-    const groupStage = { _id: null }; // Group all documents together
+    // Determine grouping fields - for now, we'll group by all available fields if groupByFields is provided
+    // If no specific groupByFields are provided, we group all together for overall aggregates
+    let groupStage = groupByFields && groupByFields.length > 0 ? { _id: {} } : { _id: null };
+    
+    // Add grouping fields to the _id object if specified
+    if (groupByFields && groupByFields.length > 0) {
+      groupByFields.forEach(fieldObj => {
+        const fieldName = resolveFieldPath(root, fieldObj);
+        groupStage._id[fieldObj.field] = `$${fieldName}`;
+      });
+    }
     
     aggregationOps.forEach(op => {
       if (op.operator === 'count') {
@@ -208,7 +219,30 @@ function buildAggregationPipeline(filters, aggregationOps = [], havingFilters = 
 
   // Add post-aggregation match stage (HAVING clause)
   if (havingFilters.length > 0) {
-    pipeline.push({ $match: buildMatch(havingFilters) });
+    const havingMatch = {};
+    
+    havingFilters.forEach(h => {
+      // Resolve field paths for HAVING clause (these refer to aggregation results)
+      const field = h.field;  // In HAVING, this refers to the aggregation result field
+      const operator = h.operator;
+      const value = h.value;
+      
+      if (!OPERATORS[operator]) {
+        throw new Error(`Invalid operator in HAVING clause: ${operator}`);
+      }
+      
+      const condition = OPERATORS[operator](value);
+      
+      if (!havingMatch[field]) {
+        havingMatch[field] = condition;
+      } else {
+        Object.assign(havingMatch[field], condition);
+      }
+    });
+    
+    if (Object.keys(havingMatch).length > 0) {
+      pipeline.push({ $match: havingMatch });
+    }
   }
   
   return pipeline;
@@ -216,7 +250,7 @@ function buildAggregationPipeline(filters, aggregationOps = [], havingFilters = 
 
 app.post("/query", async (req, res) => {
   try {
-    const { database, filters = [], aggregation = [], having = [] } = req.body;
+    const { database, filters = [], aggregation = [], having = [], groupBy = [] } = req.body;
     
     if (!database) {
       return res.status(400).json({ error: "Database name is required" });
@@ -224,21 +258,87 @@ app.post("/query", async (req, res) => {
     
     const db = await getDB(database);
 
-    let pipeline = [];
     let detailedData = [];
     let aggregationData = [];
     let response = {};
 
     if (aggregation && aggregation.length > 0) {
-      // When aggregation is present, get both detailed records and aggregated results
-      
-      // Get detailed records
-      const detailedPipeline = buildDetailedRecordsPipeline(filters);
-      detailedData = await db.collection(resolveRoot(filters)).aggregate(detailedPipeline, { allowDiskUse: true }).toArray();
-      
-      // Get aggregated results (now with optional having filters)
-      const aggregationPipeline = buildAggregationPipeline(filters, aggregation, having);
+      // When aggregation is present, use the unified aggregation pipeline
+      const aggregationPipeline = buildAggregationPipeline(filters, aggregation, having, groupBy);
       aggregationData = await db.collection(resolveRoot(filters)).aggregate(aggregationPipeline, { allowDiskUse: true }).toArray();
+      
+      // For detailed records when HAVING is used, we need to get records that would contribute 
+      // to the aggregated results that passed the HAVING condition
+      let detailedPipeline = [];
+      
+      // Build the base pipeline with joins and filters (same as aggregation pipeline up to group stage)
+      const root = resolveRoot(filters);
+      const joins = buildJoinPlan(root, filters);
+      
+      joins.forEach(j => {
+        detailedPipeline.push({
+          $lookup: {
+            from: j.from,
+            localField: j.localField,
+            foreignField: j.foreignField,
+            as: j.as
+          }
+        });
+        detailedPipeline.push({ $unwind: `$${j.as}` });
+      });
+      
+      // Add match stage for filters (WHERE clause)
+      if (filters.length > 0) {
+        const matchFilters = filters.map(f => ({
+          field: resolveFieldPath(root, f),
+          operator: f.operator,
+          value: f.value
+        })).filter(f => !['sum', 'avg', 'min', 'max', 'count'].includes(f.operator));
+        
+        if (matchFilters.length > 0) {
+          detailedPipeline.push({ $match: buildMatch(matchFilters) });
+        }
+      }
+      
+      // If HAVING conditions exist and we want to filter detailed records based on the aggregation groups that passed HAVING,
+      // we need to identify which entities (e.g. customers) met the HAVING criteria and only return records related to those entities
+      if (having.length > 0 && groupBy.length > 0) {
+        // We need to identify which group values passed the HAVING conditions
+        // Then filter the detailed records to only include those that match those group values
+        
+        // Get the group IDs/values that passed HAVING from aggregation results
+        const passingGroups = aggregationData.map(result => result._id);
+        
+        // If we have passing groups, filter detailed records to only include those that belong to these groups
+        if (passingGroups.length > 0) {
+          // Create a match condition to filter detailed records based on the group fields
+          const groupMatchConditions = {};
+          
+          // For each groupBy field, add conditions to match records that belong to passing groups
+          groupBy.forEach((gb, index) => {
+            const fieldName = resolveFieldPath(root, gb);
+            // Extract the values for this group field from the passing groups
+            const values = passingGroups
+              .filter(g => g && g[gb.field]) // Only consider groups that have this field
+              .map(g => g[gb.field]);
+              
+            if (values.length > 0) {
+              groupMatchConditions[fieldName] = { $in: values };
+            }
+          });
+          
+          // Add the group matching condition to the detailed pipeline
+          if (Object.keys(groupMatchConditions).length > 0) {
+            detailedPipeline.push({ $match: groupMatchConditions });
+          }
+        } else {
+          // If no groups passed the HAVING condition, we should return empty detailed results
+          // Add a condition that will never match anything to return empty results
+          detailedPipeline.push({ $match: { _id: null } }); // This will result in empty set
+        }
+      }
+      
+      detailedData = await db.collection(resolveRoot(filters)).aggregate(detailedPipeline, { allowDiskUse: true }).toArray();
       
       // Enhance detailed records to include requested field values from joined collections
       const enhancedDetailedData = await enhanceResultsWithJoinedFields(db, detailedData, filters);
@@ -257,6 +357,8 @@ app.post("/query", async (req, res) => {
       // Handle regular query (backward compatibility)
       const root = resolveRoot(filters);
       const joins = buildJoinPlan(root, filters);
+      
+      let pipeline = [];
       
       joins.forEach(j => {
         pipeline.push({
@@ -480,7 +582,7 @@ async function enhanceResultsWithJoinedFields(db, data, filters) {
 // Save query configuration endpoint
 app.post("/save-query-config", async (req, res) => {
   try {
-    const { name, description, filters = [], aggregation = [] } = req.body;
+    const { name, description, filters = [], aggregation = [], having = [], groupBy = [] } = req.body;
     if (!name) return res.status(400).json({ error: "Name is required" });
     const db = await getDB(process.env.STORAGE_DB || 'queryStorage');
     const queryConfig = {
@@ -489,6 +591,8 @@ app.post("/save-query-config", async (req, res) => {
       description,
       filters,
       aggregation,
+      having,
+      groupBy,
       createdAt: new Date(),
       updatedAt: new Date()
     };

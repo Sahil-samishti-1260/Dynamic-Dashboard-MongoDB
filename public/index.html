@@ -94,6 +94,14 @@
         margin-right: 12px;
         font-size: 1.3rem;
       }
+      
+      .section-subtitle {
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+        margin-bottom: 15px;
+        font-style: italic;
+        padding-left: 2px;
+      }
 
       .filters-section .section-title::before {
         content: "🔍";
@@ -657,22 +665,17 @@
 
       <main class="main-content">
         <section class="section filters-section">
-          <h2 class="section-title">Query Filters</h2>
+          <h2 class="section-title">Data Filters</h2>
+          <p class="section-subtitle">Specify conditions to find your data (e.g., region = West)</p>
           <div id="filters"></div>
           <button class="btn-primary" onclick="addRow()">➕ Add Filter</button>
         </section>
               
         <section class="section aggregation-section">
-          <h2 class="section-title">Calculate Values</h2>
+          <h2 class="section-title">Calculate & Apply Conditions</h2>
+          <p class="section-subtitle">Calculate totals and set conditions (e.g., total sales > 1000)</p>
           <div id="aggregations"></div>
-          <button class="btn-primary" onclick="addAggregationRow()">➕ Add Calculation</button>
-        </section>
-
-        <section class="section having-section">
-          <h2 class="section-title">Filter Calculated Values (HAVING)</h2>
-          <p class="section-subtitle">Add filters on the results of your calculations (e.g., sum > 1000)</p>
-          <div id="having"></div>
-          <button class="btn-primary" onclick="addHavingRow()">➕ Add Post-Filter</button>
+          <button class="btn-primary" onclick="addAggregationRow()">➕ Add Calculation & Condition</button>
         </section>
 
         <section class="section actions-section">
@@ -683,19 +686,26 @@
         </section>
 
         <section class="section results-section">
-          <h2 class="section-title">Query Results</h2>
+          <h2 class="section-title">Results</h2>
           <div id="resultsContainer">
             <div id="detailedResults">
               <h3 class="results-subtitle">📋 Detailed Records</h3>
               <div id="detailedTableContainer"></div>
             </div>
             <div id="aggregationResults">
-              <h3 class="results-subtitle">📊 Summary Statistics</h3>
+              <h3 class="results-subtitle">📊 Summary Data</h3>
               <div id="aggregationTableContainer"></div>
             </div>
           </div>
         </section>
       </main>
+      
+      <section id="savedConfigsSection" class="section saved-configs-section">
+        <h2 class="section-title">💾 Saved Queries</h2>
+        <div id="savedConfigsContent">
+          <p class="no-saved">Loading saved queries...</p>
+        </div>
+      </section>
     </div>
 
     <pre id="out"></pre>
@@ -917,13 +927,58 @@
         opLabel.textContent = "Calculation Type";
         const opSel = document.createElement("select");
         opSel.innerHTML = `
-    <option value="sum">SUM (Calculate Total)</option>
-    <option value="count">COUNT (How Many Items)</option>
-    <option value="avg">AVERAGE (Find Average)</option>
-    <option value="min">LOWEST (Find Smallest)</option>
-    <option value="max">HIGHEST (Find Largest)</option>
+    <option value="sum">SUM (Total)</option>
+    <option value="count">COUNT (Number of Items)</option>
+    <option value="avg">AVERAGE (Mean Value)</option>
+    <option value="min">MINIMUM (Smallest Value)</option>
+    <option value="max">MAXIMUM (Largest Value)</option>
   `;
         opGroup.append(opLabel, opSel);
+
+        // Add Group By field (needed when applying conditions to totals)
+        const groupByGroup = document.createElement("div");
+        groupByGroup.className = "form-group";
+        const groupByLabel = document.createElement("label");
+        groupByLabel.textContent = "Group By (for totals)";
+        const groupBySel = document.createElement("select");
+        groupBySel.innerHTML = `<option value="">Same as calculation field (default)</option>`;
+        if (allFields && Array.isArray(allFields)) {
+          allFields.forEach((f) => {
+            const opt = document.createElement("option");
+            opt.value = `${f.collection}.${f.value}`;
+            opt.textContent = `${f.collection}.${f.value}`;
+            opt.dataset.collection = f.collection;
+            opt.dataset.field = f.value;
+            groupBySel.appendChild(opt);
+          });
+        }
+        groupByGroup.append(groupByLabel, groupBySel);
+
+        // Add filter fields for applying conditions to totals
+        const havingOpGroup = document.createElement("div");
+        havingOpGroup.className = "form-group";
+        const havingOpLabel = document.createElement("label");
+        havingOpLabel.textContent = "Apply Condition";
+        const havingOpSel = document.createElement("select");
+        havingOpSel.innerHTML = `
+          <option value="">No condition (optional)</option>
+          <option value="gt">Greater than (>)</option>
+          <option value="gte">Greater than or equal (>=)</option>
+          <option value="lt">Less than (<)</option>
+          <option value="lte">Less than or equal (<=)</option>
+          <option value="eq">Equal to (=)</option>
+          <option value="ne">Not equal to (!=)</option>
+        `;
+        havingOpGroup.append(havingOpLabel, havingOpSel);
+
+        const havingValueGroup = document.createElement("div");
+        havingValueGroup.className = "form-group";
+        const havingValueLabel = document.createElement("label");
+        havingValueLabel.textContent = "Condition Value";
+        const havingValueInput = document.createElement("input");
+        havingValueInput.type = "text";
+        havingValueInput.placeholder = "e.g. 1000 (leave empty if no condition)";
+        havingValueGroup.append(havingValueLabel, havingValueInput);
 
         const btn = document.createElement("button");
         btn.className = "btn-danger";
@@ -931,7 +986,7 @@
         btn.setAttribute("aria-label", "Remove calculation");
         btn.onclick = () => row.remove();
 
-        row.append(fieldGroup, opGroup, btn);
+        row.append(fieldGroup, opGroup, groupByGroup, havingOpGroup, havingValueGroup, btn);
         aggregationsContainer.appendChild(row);
 
         // Add animation
@@ -947,10 +1002,15 @@
       function collectAggregations() {
         const rows = document.querySelectorAll(".aggregation-row");
         const aggregations = [];
+        const havingFilters = [];
+        const groupByFields = [];
 
         rows.forEach((r, index) => {
           const fieldSel = r.children[0].querySelector("select");
           const opSel = r.children[1].querySelector("select");
+          const groupBySel = r.children[2].querySelector("select"); // Group by field
+          const havingOpSel = r.children[3].querySelector("select"); // HAVING operator
+          const havingValueInput = r.children[4].querySelector("input"); // HAVING value
 
           if (!fieldSel || !opSel) {
             console.warn(`Skipping aggregation row ${index}: Missing elements`);
@@ -959,6 +1019,9 @@
 
           const fieldSelVal = fieldSel.value;
           const op = opSel.value;
+          const groupByValue = groupBySel ? groupBySel.value : '';
+          const havingOp = havingOpSel ? havingOpSel.value : '';
+          const havingValue = havingValueInput ? havingValueInput.value : '';
 
           // Skip empty aggregations
           if (!fieldSelVal || !op) {
@@ -972,108 +1035,66 @@
           const collection = opt.dataset.collection;
           const field = opt.dataset.field;
 
+          // Add aggregation
           const aggregation = {
             operator: op,
             collection: collection,
             field: field,
-            alias: op, // Set alias to operator name to match having filters
+            alias: `${op}_${field.replace(/\./g, '_')}`, // Create unique alias
           };
 
           aggregations.push(aggregation);
           console.log(
             `Added aggregation: ${op} on ${collection}.${field} as ${aggregation.alias}`
           );
-        });
 
-        console.log(`Aggregations collected: ${aggregations.length}`);
-        return aggregations;
-      }
+          // Add group by field if specified
+          if (groupByValue) {
+            const groupOpt = groupBySel.selectedOptions[0];
+            const groupCollection = groupOpt.dataset.collection;
+            const groupField = groupOpt.dataset.field;
+            
+            groupByFields.push({
+              collection: groupCollection,
+              field: groupField
+            });
+          } else {
+            // Default: group by the same field as the calculation
+            groupByFields.push({
+              collection: collection,
+              field: field
+            });
+          }
 
-      function addHavingRow() {
-        const havingContainer = document.getElementById("having");
-
-        const row = document.createElement("div");
-        row.className = "filter-row";
-
-        // Field selection (Calculated field names)
-        const fieldGroup = document.createElement("div");
-        fieldGroup.className = "form-group";
-        const fieldLabel = document.createElement("label");
-        fieldLabel.textContent = "Calculated Field";
-        const fieldSel = document.createElement("select");
-        fieldSel.innerHTML = `
-          <option value="sum">sum</option>
-          <option value="avg">avg</option>
-          <option value="count">count</option>
-          <option value="min">min</option>
-          <option value="max">max</option>
-        `;
-        fieldGroup.append(fieldLabel, fieldSel);
-
-        // Operator selection
-        const opGroup = document.createElement("div");
-        opGroup.className = "form-group";
-        const opLabel = document.createElement("label");
-        opLabel.textContent = "Condition";
-        const opSel = document.createElement("select");
-        opSel.innerHTML = `
-          <option value="gt">Greater than (>)</option>
-          <option value="gte">Greater than or equal (>=)</option>
-          <option value="lt">Less than (<)</option>
-          <option value="lte">Less than or equal (<=)</option>
-          <option value="eq">Equal (=)</option>
-        `;
-        opGroup.append(opLabel, opSel);
-
-        // Value input
-        const valGroup = document.createElement("div");
-        valGroup.className = "form-group";
-        const valLabel = document.createElement("label");
-        valLabel.textContent = "Threshold Value";
-        const valInput = document.createElement("input");
-        valInput.type = "text";
-        valInput.placeholder = "e.g. 1000";
-        valGroup.append(valLabel, valInput);
-
-        const btn = document.createElement("button");
-        btn.className = "btn-danger";
-        btn.textContent = "Remove";
-        btn.onclick = () => row.remove();
-
-        row.append(fieldGroup, opGroup, valGroup, btn);
-        havingContainer.appendChild(row);
-
-        // Add animation
-        row.style.opacity = "0";
-        row.style.transform = "translateY(-10px)";
-        setTimeout(() => {
-          row.style.transition = "all 0.3s ease";
-          row.style.opacity = "1";
-          row.style.transform = "translateY(0)";
-        }, 10);
-      }
-
-      function collectHaving() {
-        const rows = document.querySelectorAll("#having .filter-row");
-        const having = [];
-
-        rows.forEach((r, index) => {
-          const selects = r.querySelectorAll("select");
-          const field = selects[0].value;
-          const operator = selects[1].value;
-          const valInput = r.querySelector("input");
-          const value = valInput.value;
-
-          if (field && operator && value) {
-            having.push({ field, operator, value });
+          // Add HAVING filter if specified
+          if (havingOp && havingValue) {
+            const havingFilter = {
+              field: aggregation.alias, // Reference the aggregation result
+              operator: havingOp,
+              value: havingValue
+            };
+            havingFilters.push(havingFilter);
+            console.log(
+              `Added HAVING filter: ${havingFilter.field} ${havingOp} ${havingValue}`
+            );
           }
         });
 
-        return having;
+        console.log(`Aggregations collected: ${aggregations.length}`);
+        console.log(`HAVING filters collected: ${havingFilters.length}`);
+        console.log(`Group by fields collected: ${groupByFields.length}`);
+        
+        return {
+          aggregations: aggregations,
+          having: havingFilters,
+          groupBy: groupByFields
+        };
       }
 
+
+
       async function run() {
-        const runButton = event.target;
+        const runButton = event.target.closest('button') || document.querySelector('.actions-section .btn-primary');
         const originalText = runButton.textContent;
 
         // Show loading state
@@ -1082,8 +1103,10 @@
 
         try {
           const regularFilters = collectFilters();
-          const aggregations = collectAggregations();
-          const havingFilters = collectHaving();
+          const aggResult = collectAggregations(); // This now returns an object
+          const aggregations = aggResult.aggregations;
+          const havingFilters = aggResult.having; // Get having filters from the same function
+          const groupByFields = aggResult.groupBy; // Get group by fields
 
           // Debug: Log the collected filters and aggregations
           console.log("Regular filters:", regularFilters);
@@ -1112,6 +1135,11 @@
             requestBody.having = havingFilters;
           }
 
+          // Add group by fields if any
+          if (groupByFields && groupByFields.length > 0) {
+            requestBody.groupBy = groupByFields;
+          }
+
           const res = await fetch("http://localhost:3000/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1129,12 +1157,15 @@
           displayResultsInTables(json);
 
           // Show success feedback
-          const resultType =
-            json.type === "aggregation" ? "Aggregation" : "Query";
-          showNotification(
-            `${resultType} executed successfully! Found ${json.count} results.`,
-            "success"
-          );
+          let successMessage = "Query executed successfully!";
+          if (json.type === "both") {
+            successMessage = `Query completed! Found ${json.detailed_count} detailed records and ${json.aggregation_count} aggregated results.`;
+          } else if (json.type === "regular") {
+            successMessage = `Query executed successfully! Found ${json.count} results.`;
+          } else if (json.detailed_count !== undefined && json.aggregation_count !== undefined) {
+            successMessage = `Query completed! Found ${json.detailed_count} detailed records and ${json.aggregation_count} aggregated results.`;
+          }
+          showNotification(successMessage, "success");
         } catch (error) {
           console.error("Query execution failed:", error);
           showNotification(
@@ -1168,8 +1199,10 @@
         
         const description = prompt("Enter a description (optional):") || "";
         const filters = collectFilters();
-        const aggregations = collectAggregations();
-        const having = collectHaving();
+        const aggResult = collectAggregations(); // This returns an object with aggregations and having
+        const aggregations = aggResult.aggregations;
+        const having = aggResult.having;
+        const groupBy = aggResult.groupBy;
         
         if (filters.length === 0 && aggregations.length === 0 && having.length === 0) {
           showNotification("No configuration to save!", "warning");
@@ -1185,7 +1218,8 @@
             description,
             filters,
             aggregation: aggregations,
-            having: having
+            having: having,
+            groupBy: groupBy
           })
         })
         .then(response => response.json())
@@ -1237,38 +1271,40 @@
               }
             });
             
-            // Recreate aggregations
+            // Recreate aggregations with having filters
             if (config.aggregation && Array.isArray(config.aggregation)) {
-              config.aggregation.forEach(agg => {
+              config.aggregation.forEach((agg, index) => {
                 addAggregationRow();
                 const aggRows = document.querySelectorAll(".aggregation-row");
                 if (aggRows.length > 0) {
                   const lastRow = aggRows[aggRows.length - 1];
                   const selects = lastRow.querySelectorAll("select");
+                  const inputs = lastRow.querySelectorAll("input");
                   const fieldSel = selects[0];
                   const opSel = selects[1];
+                  const groupBySel = selects[2]; // Group by field
+                  const havingOpSel = selects[3]; // HAVING operator
+                  const havingValInp = inputs[0]; // HAVING value input
                   
                   if (fieldSel) fieldSel.value = `${agg.collection}.${agg.field}`;
                   if (opSel) opSel.value = agg.operator;
-                }
-              });
-            }
-
-            // Recreate having filters
-            if (config.having && Array.isArray(config.having)) {
-              config.having.forEach(h => {
-                addHavingRow();
-                const rows = document.querySelectorAll("#having .filter-row");
-                if (rows.length > 0) {
-                  const lastRow = rows[rows.length - 1];
-                  const selects = lastRow.querySelectorAll("select");
-                  const fieldSel = selects[0];
-                  const opSel = selects[1];
-                  const valInp = lastRow.querySelector("input");
                   
-                  if (fieldSel) fieldSel.value = h.field;
-                  if (opSel) opSel.value = h.operator;
-                  if (valInp) valInp.value = h.value;
+                  // Set group by field if available
+                  if (config.groupBy && Array.isArray(config.groupBy) && config.groupBy[index]) {
+                    const groupByField = config.groupBy[index];
+                    if (groupBySel) {
+                      groupBySel.value = `${groupByField.collection}.${groupByField.field}`;
+                    }
+                  }
+                  
+                  // Look for corresponding having filter for this aggregation
+                  if (config.having && Array.isArray(config.having)) {
+                    const correspondingHaving = config.having.find(h => h.field === agg.alias);
+                    if (correspondingHaving && havingOpSel && havingValInp) {
+                      havingOpSel.value = correspondingHaving.operator;
+                      havingValInp.value = correspondingHaving.value;
+                    }
+                  }
                 }
               });
             }
@@ -1289,55 +1325,117 @@
         .then(response => response.json())
         .then(data => {
           const configs = data.configs || [];
-          const container = document.getElementById("savedConfigsList") || createSavedConfigsContainer();
-          const content = container.querySelector("#savedConfigsContent");
+          const content = document.getElementById("savedConfigsContent");
           
           if (configs.length === 0) {
             content.innerHTML = '<p class="no-saved">No saved configurations yet</p>';
             return;
           }
           
-          let tableHtml = `
-            <div class="configs-table-wrapper">
-              <table class="configs-table">
-                <thead>
-                  <tr>
-                    <th>Config Name</th>
-                    <th>Description</th>
-                    <th>Components</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-          `;
+          // Show first 3 configs directly, rest in dropdown
+          const visibleConfigs = configs.slice(0, 3);
+          const hiddenConfigs = configs.slice(3);
+          
+          let html = '';
+          
+          if (visibleConfigs.length > 0) {
+            html += `
+              <div class="configs-table-wrapper">
+                <table class="configs-table">
+                  <thead>
+                    <tr>
+                      <th>Config Name</th>
+                      <th>Description</th>
+                      <th>Components</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+            `;
 
-          tableHtml += configs.map(config => `
-            <tr>
-              <td><strong>${config.name}</strong></td>
-              <td>${config.description || '<span style="color:#999 italic">No description</span>'}</td>
-              <td>
-                <span class="badge">🔍 ${config.filters.length} Filters</span>
-                <span class="badge">📊 ${config.aggregation?.length || 0} Calcs</span>
-              </td>
-              <td class="config-actions">
-                <button class="btn-small btn-load" onclick="loadSavedConfig('${config.name.replace(/'/g, "\\'")}')">Load</button>
-                <button class="btn-small btn-danger" onclick="deleteSavedConfig('${config._id}')">Delete</button>
-              </td>
-            </tr>
-          `).join('');
+            html += visibleConfigs.map(config => `
+              <tr>
+                <td><strong>${config.name}</strong></td>
+                <td>${config.description || '<span style="color:#999 italic">No description</span>'}</td>
+                <td>
+                  <span class="badge">🔍 ${config.filters.length} Filters</span>
+                  <span class="badge">📊 ${config.aggregation?.length || 0} Calcs</span>
+                </td>
+                <td class="config-actions">
+                  <button class="btn-small btn-load" onclick="loadSavedConfig('${config.name.replace(/'/g, "\\'")}')">Load</button>
+                  <button class="btn-small btn-danger" onclick="deleteSavedConfig('${config._id}')">Delete</button>
+                </td>
+              </tr>
+            `).join('');
+            
+            html += `
+                  </tbody>
+                </table>
+              </div>
+            `;
+          }
           
-          tableHtml += `
-                </tbody>
-              </table>
-            </div>
-          `;
+          // Add dropdown for remaining configs if any
+          if (hiddenConfigs.length > 0) {
+            html += `
+              <div class="see-more-container" style="margin-top: 20px;">
+                <details>
+                  <summary style="
+                    cursor: pointer; 
+                    padding: 12px; 
+                    background: var(--background-light); 
+                    border: 1px solid var(--border-color); 
+                    border-radius: 8px; 
+                    font-weight: 600;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                  ">
+                    <span>📁 More Saved Queries (${hiddenConfigs.length} hidden)</span>
+                    <span style="font-size: 1.2em;">▼</span>
+                  </summary>
+                  <div class="configs-table-wrapper" style="margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 15px;">
+                    <table class="configs-table">
+                      <thead>
+                        <tr>
+                          <th>Config Name</th>
+                          <th>Description</th>
+                          <th>Components</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+            `;
+
+            html += hiddenConfigs.map(config => `
+              <tr>
+                <td><strong>${config.name}</strong></td>
+                <td>${config.description || '<span style="color:#999 italic">No description</span>'}</td>
+                <td>
+                  <span class="badge">🔍 ${config.filters.length} Filters</span>
+                  <span class="badge">📊 ${config.aggregation?.length || 0} Calcs</span>
+                </td>
+                <td class="config-actions">
+                  <button class="btn-small btn-load" onclick="loadSavedConfig('${config.name.replace(/'/g, "\\'")}')">Load</button>
+                  <button class="btn-small btn-danger" onclick="deleteSavedConfig('${config._id}')">Delete</button>
+                </td>
+              </tr>
+            `).join('');
+            
+            html += `
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              </div>
+            `;
+          }
           
-          content.innerHTML = tableHtml;
+          content.innerHTML = html;
         })
         .catch(error => {
           console.error("Load configs list error:", error);
-          const container = document.getElementById("savedConfigsList") || createSavedConfigsContainer();
-          container.querySelector("#savedConfigsContent").innerHTML = 
+          document.getElementById("savedConfigsContent").innerHTML = 
             '<p class="no-saved">Error loading saved configurations</p>';
         });
       }
@@ -1361,24 +1459,6 @@
           console.error("Delete config error:", error);
           showNotification("Error deleting configuration", "error");
         });
-      }
-
-      function createSavedConfigsContainer() {
-        const container = document.createElement("div");
-        container.id = "savedConfigsList";
-        container.className = "section saved-configs-section";
-        container.innerHTML = `
-          <h2 class="section-title">💾 Saved Configurations</h2>
-          <div id="savedConfigsContent"></div>
-        `;
-        
-        const resultsSection = document.querySelector('.results-section');
-        if (resultsSection) {
-          resultsSection.parentNode.insertBefore(container, resultsSection);
-        } else {
-          document.querySelector('.main-content').appendChild(container);
-        }
-        return container;
       }
 
       function showNotification(message, type = "info") {
@@ -1444,6 +1524,19 @@
           // Display only detailed records (backward compatibility)
           displayDetailedTable(detailedContainer, response.data);
           aggregationContainer.innerHTML = '<div class="empty-state"><h3>No Aggregation Data</h3><p>Add aggregation calculations to see summary statistics</p></div>';
+        } else if (response.aggregation_data !== undefined) {
+          // Handle unified response where we have aggregation results
+          if (response.aggregation_data && response.aggregation_data.length > 0) {
+            displayAggregationTable(aggregationContainer, response.aggregation_data);
+          } else {
+            aggregationContainer.innerHTML = '<div class="empty-state"><h3>No Aggregation Results</h3><p>No records matched your criteria with the applied calculations</p></div>';
+          }
+          
+          if (response.detailed_data && response.detailed_data.length > 0) {
+            displayDetailedTable(detailedContainer, response.detailed_data);
+          } else {
+            detailedContainer.innerHTML = '<div class="empty-state"><h3>No Detailed Records</h3><p>No detailed records matched your criteria</p></div>';
+          }
         } else {
           // Fallback for unknown response types
           detailedContainer.innerHTML = '<div class="no-results">No results found</div>';
@@ -1739,6 +1832,7 @@
         );
       });
 
+      // Also load fields when page loads
       loadFields();
     </script>
   </body>
