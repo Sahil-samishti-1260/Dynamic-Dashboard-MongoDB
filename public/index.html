@@ -1210,7 +1210,8 @@
         }
         
         // Send to backend
-        fetch("http://localhost:3000/save-query-config", {
+        // fetch("http://localhost:3000/save-query-config", {
+        fetch("https://dynamic-dashboard-mongodb.onrender.com/save-query-config", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1239,7 +1240,8 @@
 
       function loadSavedConfig(configName) {
         // First get all configs to find the one with the given name
-        fetch("http://localhost:3000/query-configs")
+        // fetch("http://localhost:3000/query-configs")
+        fetch("https://dynamic-dashboard-mongodb.onrender.com/query-configs")
         .then(response => response.json())
         .then(data => {
           const config = data.configs.find(c => c.name === configName);
@@ -1321,7 +1323,8 @@
       }
 
       function loadSavedConfigsList() {
-        fetch("http://localhost:3000/query-configs")
+        // fetch("http://localhost:3000/query-configs")
+        fetch("https://dynamic-dashboard-mongodb.onrender.com/query-configs")
         .then(response => response.json())
         .then(data => {
           const configs = data.configs || [];
@@ -1443,7 +1446,8 @@
       function deleteSavedConfig(configId) {
         if (!confirm("Delete this configuration?")) return;
         
-        fetch(`http://localhost:3000/query-config/${configId}`, {
+        // fetch(`http://localhost:3000/query-config/${configId}`, {
+        fetch(`https://dynamic-dashboard-mongodb.onrender.com/query-config/${configId}`, {
           method: "DELETE"
         })
         .then(response => response.json())
