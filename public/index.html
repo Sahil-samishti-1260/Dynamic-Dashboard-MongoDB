@@ -712,12 +712,16 @@
 
     <script>
       const DATABASE = "salesDB";
+      // Dynamically determine the API base URL based on the current hostname
+      const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+        ? 'http://localhost:3000' 
+        : 'https://dynamic-dashboard-mongodb.onrender.com';
       let allFields = [];
       let filters = [];
 
       async function loadFields() {
         try {
-          const res = await fetch(`http://localhost:3000/all-fields/${DATABASE}`);
+          const res = await fetch(`${API_BASE_URL}/all-fields/${DATABASE}`);
           const json = await res.json();
           if (json.error) {
             console.error('Error loading fields:', json.error);
@@ -1140,7 +1144,7 @@
             requestBody.groupBy = groupByFields;
           }
 
-          const res = await fetch("http://localhost:3000/query", {
+          const res = await fetch(`${API_BASE_URL}/query", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody),
@@ -1210,7 +1214,7 @@
         }
         
         // Send to backend
-        // fetch("http://localhost:3000/save-query-config", {
+        // fetch(`${API_BASE_URL}/save-query-config", {
         fetch("https://dynamic-dashboard-mongodb.onrender.com/save-query-config", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1240,7 +1244,7 @@
 
       function loadSavedConfig(configName) {
         // First get all configs to find the one with the given name
-        // fetch("http://localhost:3000/query-configs")
+        // fetch(`${API_BASE_URL}/query-configs")
         fetch("https://dynamic-dashboard-mongodb.onrender.com/query-configs")
         .then(response => response.json())
         .then(data => {
@@ -1323,7 +1327,7 @@
       }
 
       function loadSavedConfigsList() {
-        // fetch("http://localhost:3000/query-configs")
+        // fetch(`${API_BASE_URL}/query-configs")
         fetch("https://dynamic-dashboard-mongodb.onrender.com/query-configs")
         .then(response => response.json())
         .then(data => {
@@ -1446,7 +1450,7 @@
       function deleteSavedConfig(configId) {
         if (!confirm("Delete this configuration?")) return;
         
-        // fetch(`http://localhost:3000/query-config/${configId}`, {
+        // fetch(`${API_BASE_URL}/query-config/${configId}`, {
         fetch(`https://dynamic-dashboard-mongodb.onrender.com/query-config/${configId}`, {
           method: "DELETE"
         })
